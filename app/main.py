@@ -85,7 +85,7 @@ def startup() -> None:
 
 def session_token() -> str:
     payload = f"{ADMIN_USER}\0{ADMIN_PASSWORD}".encode()
-    return hmac.new(SESSION_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+    return hmac.new(APP_SECRET.encode(), payload, hashlib.sha256).hexdigest()
 
 
 def valid_credentials(username: str, password: str) -> bool:

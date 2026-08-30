@@ -52,7 +52,6 @@ SUBLINK_PORT=${SUBLINK_PORT}
 ADMIN_USER=${ADMIN_USER}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 APP_SECRET=${APP_SECRET}
-SESSION_SECRET=${SESSION_SECRET}
 PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
 DOMAIN=${DOMAIN:-}
 DOMAIN_HTTPS=${DOMAIN_HTTPS:-0}
@@ -143,7 +142,6 @@ services:
     environment:
       DB_PATH: /data/subscriptions.db
       APP_SECRET: ${APP_SECRET}
-      SESSION_SECRET: ${SESSION_SECRET}
       ADMIN_USER: ${ADMIN_USER}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
@@ -161,7 +159,6 @@ SUBLINK_PORT=${SUBLINK_PORT}
 ADMIN_USER=${ADMIN_USER}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
 APP_SECRET=${APP_SECRET}
-SESSION_SECRET=${SESSION_SECRET}
 PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
 EOF
   chmod 600 "$INSTALL_DIR/.env"
@@ -224,10 +221,6 @@ install_app(){
   install_docker
   if [ -f "$STATE_FILE" ]; then
     load_state
-    if [ -z "$SESSION_SECRET" ]; then
-      SESSION_SECRET=*** 32)
-      info "已为旧版本生成新的会话密钥。"
-    fi
     warn "检测到已有安装，将保留数据并更新程序。"
   else
     SUBLINK_PORT=$(find_free_port)

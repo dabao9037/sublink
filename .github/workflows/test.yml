@@ -15,4 +15,18 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: PYTHONPATH=. pytest -q
       - run: bash -n install.sh
+      - name: Legacy config must not require a new variable
+        run: |
+          ! grep -q 'SESSION_SECRET' install.sh
+          mkdir -p /tmp/sublink-legacy
+          cat >/tmp/sublink-legacy/config.env <<'EOF'
+          SUBLINK_PORT=18096
+          ADMIN_USER=legacy
+          ADMIN_PASSWORD=***
+          APP_SECRET=***
+          PUBLIC_BASE_URL=
+          DOMAIN=
+          DOMAIN_HTTPS=0
+          EOF
+          bash -uec 'source /tmp/sublink-legacy/config.env; test -n "$APP_SECRET"'
       - run: docker build -t sublink:test .
