@@ -5,6 +5,8 @@ import json
 import os
 import secrets
 import sqlite3
+import hashlib
+import hmac
 from io import BytesIO
 from contextlib import closing
 from datetime import datetime, timezone
@@ -15,9 +17,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 import yaml
 import qrcode
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -40,7 +41,6 @@ if not ADMIN_PASSWORD:
     raise RuntimeError("ADMIN_PASSWORD is required")
 
 fernet = Fernet(APP_SECRET.encode())
-security = HTTPBasic()
 app = FastAPI(title="节点转订阅", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static", html=False), name="static")
 
@@ -83,16 +83,22 @@ def startup() -> None:
     init_db()
 
 
-def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    user_ok = secrets.compare_digest(credentials.username.encode(), ADMIN_USER.encode())
-    pass_ok = secrets.compare_digest(credentials.password.encode(), ADMIN_PASSWORD.encode())
-    if not (user_ok and pass_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="账号或密码错误",
-            headers={"WWW-Authenticate": 'Basic realm="Node Subscription Admin"'},
-        )
-    return credentials.username
+def session_token() -> str:
+    payload = f"{ADMIN_USER}\0{ADMIN_PASSWORD}".encode()
+    return hmac.new(SESSION_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+
+
+def valid_credentials(username: str, password: str) -> bool:
+    return secrets.compare_digest(username.encode(), ADMIN_USER.encode()) and secrets.compare_digest(
+        password.encode(), ADMIN_PASSWORD.encode()
+    )
+
+
+def require_admin(request: Request) -> str:
+    supplied = request.cookies.get("sublink_session", "")
+    if supplied and secrets.compare_digest(supplied, session_token()):
+        return ADMIN_USER
+    raise HTTPException(status_code=401, detail="请先登录")
 
 
 def split_nodes(raw: str) -> list[str]:
@@ -365,8 +371,6 @@ def clash_config(name: str, nodes: list[str]) -> str:
 async def http_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code == 401 and request.url.path != "/login" and not request.url.path.startswith("/api/"):
         return RedirectResponse("/login", status_code=303)
-    from fastapi.responses import JSONResponse
-
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
 
 
