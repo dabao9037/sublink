@@ -37,6 +37,9 @@ PY
 
 load_state(){
   [ -f "$STATE_FILE" ] || die "尚未安装 $APP_NAME，请先选择 1 安装。"
+  # Old releases did not have SESSION_SECRET. Define it before sourcing while
+  # set -u is active so upgrading those installations never aborts.
+  SESSION_SECRET="${SESSION_SECRET-}"
   # shellcheck disable=SC1090
   source "$STATE_FILE"
 }
@@ -221,7 +224,10 @@ install_app(){
   install_docker
   if [ -f "$STATE_FILE" ]; then
     load_state
-    SESSION_SECRET="${SESSION_SECRET:*** 32)}"
+    if [ -z "$SESSION_SECRET" ]; then
+      SESSION_SECRET=*** 32)
+      info "已为旧版本生成新的会话密钥。"
+    fi
     warn "检测到已有安装，将保留数据并更新程序。"
   else
     SUBLINK_PORT=$(find_free_port)
