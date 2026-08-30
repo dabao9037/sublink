@@ -408,8 +408,8 @@ def index(_: str = Depends(require_admin)) -> HTMLResponse:
     return HTMLResponse((BASE_DIR / "static" / "index.html").read_text())
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request) -> HTMLResponse | RedirectResponse:
+@app.get("/login", response_class=HTMLResponse, response_model=None)
+def login_page(request: Request) -> Response:
     token = request.cookies.get("sublink_session", "")
     if token and secrets.compare_digest(token, session_token()):
         return RedirectResponse("/", status_code=303)
@@ -417,8 +417,8 @@ def login_page(request: Request) -> HTMLResponse | RedirectResponse:
     return HTMLResponse(html)
 
 
-@app.post("/login", response_class=HTMLResponse)
-def login_submit(username: str = Form(...), password: str = Form(...)) -> HTMLResponse | RedirectResponse:
+@app.post("/login", response_class=HTMLResponse, response_model=None)
+def login_submit(username: str = Form(...), password: str = Form(...)) -> Response:
     if not valid_credentials(username, password):
         message = '<div class="error">用户名或密码不正确，请重新输入。</div>'
         html = (BASE_DIR / "static" / "login.html").read_text().replace("{error}", message)
