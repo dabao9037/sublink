@@ -1,0 +1,15 @@
+services:
+  node-subscription:
+    build: .
+    container_name: node-subscription
+    restart: unless-stopped
+    environment:
+      DB_PATH: /data/subscriptions.db
+      APP_SECRET: ${APP_SECRET}
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+    volumes:
+      - ./data:/data
+    ports:
+      - "${SUBLINK_PORT:-8096}:8080"

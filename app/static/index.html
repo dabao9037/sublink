@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>节点转订阅</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260830-1240">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <main class="shell">
+    <header class="hero">
+      <div class="brand"><span class="logo">S</span><span>SUBLINK</span></div>
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">PRIVATE SUBSCRIPTION TOOL</p>
+          <h1>多个节点，<br><em>一个订阅。</em></h1>
+          <p class="subtitle">将 VLESS、VMess、Trojan、Shadowsocks 节点汇总为长期订阅地址。节点数据加密存储，仅管理端可查看。</p>
+        </div>
+        <div class="stats">
+          <div><strong id="subCount">0</strong><span>订阅</span></div>
+          <div><strong id="nodeCount">0</strong><span>节点</span></div>
+          <div><strong>4</strong><span>协议</span></div>
+        </div>
+      </div>
+    </header>
+
+    <section id="resultPanel" class="result-panel" hidden>
+      <div class="result-copy">
+        <span class="result-check">✓</span>
+        <div><p class="eyebrow">SUBSCRIPTION READY</p><h2>订阅链接已生成</h2><p>同一个地址兼容 Clash/Mihomo 与通用订阅客户端，编辑节点后地址保持不变。</p></div>
+      </div>
+      <div class="result-content">
+        <div class="result-links">
+          <div class="result-link"><label>订阅链接</label><input id="resultUniversal" readonly><a id="openUniversal" target="_blank" rel="noreferrer">打开</a><button type="button" data-result-copy="universal">复制</button></div>
+          <p class="compatibility">自动兼容 Clash Meta / Mihomo / v2rayN / Shadowrocket 等客户端</p>
+        </div>
+        <div class="result-qr"><img id="resultQr" alt="订阅二维码"><span>扫码导入订阅</span></div>
+      </div>
+      <button type="button" id="closeResult" class="result-close" aria-label="关闭">×</button>
+    </section>
+
+    <section class="workspace">
+      <aside class="steps">
+        <div class="step active"><b>01</b><span>粘贴节点</span></div>
+        <div class="step"><b>02</b><span>生成订阅</span></div>
+        <div class="step"><b>03</b><span>导入客户端</span></div>
+        <div class="protocols"><span>VLESS</span><span>VMESS</span><span>TROJAN</span><span>SS</span></div>
+      </aside>
+
+      <form id="editor" class="editor-card">
+        <input type="hidden" id="editId">
+        <div class="field-head">
+          <label for="name">订阅名称</label>
+          <span id="modeText">新建订阅</span>
+        </div>
+        <input id="name" maxlength="80" placeholder="例如：我的常用节点" required>
+        <div class="field-head nodes-head">
+          <label for="nodes">节点链接</label>
+          <span><i id="lineCount">0</i> 个节点 · 一行一个</span>
+        </div>
+        <textarea id="nodes" spellcheck="false" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://..." required></textarea>
+        <div id="error" class="notice error" hidden></div>
+        <div id="success" class="notice success" hidden></div>
+        <div class="actions">
+          <button type="button" id="cancelBtn" class="button secondary" hidden>取消编辑</button>
+          <button type="submit" id="submitBtn" class="button primary"><span>生成订阅</span><b>→</b></button>
+        </div>
+      </form>
+    </section>
+
+    <section class="list-section">
+      <div class="section-title"><div><p class="eyebrow">YOUR SUBSCRIPTIONS</p><h2>订阅管理</h2></div><button id="refreshBtn" class="icon-btn" title="刷新">↻</button></div>
+      <div id="empty" class="empty"><span>↗</span><p>还没有订阅，先在上方添加节点。</p></div>
+      <div id="list" class="sub-list"></div>
+    </section>
+
+    <footer><span>SUBLINK · SELF HOSTED</span><span>订阅地址包含节点凭据，请勿公开分享。</span></footer>
+  </main>
+  <script>
+    // 清理该域名旧版图片站遗留的 Service Worker 和缓存，避免继续加载旧前端。
+    if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+    if ('caches' in window) caches.keys().then(keys => keys.forEach(key => caches.delete(key)));
+  </script>
+  <script src="/static/app.js?v=20260830-1240"></script>
+</body>
+</html>

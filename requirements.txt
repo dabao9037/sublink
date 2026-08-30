@@ -1,0 +1,6 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+cryptography==45.0.6
+PyYAML==6.0.2
+python-multipart==0.0.20
+qrcode[pil]==8.2
