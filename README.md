@@ -12,7 +12,7 @@
 支持 Ubuntu / Debian，需使用 root 用户：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/1828006573/sublink/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/dabao9037/sublink/main/install.sh)
 ```
 
 脚本打开后会显示菜单：
@@ -105,7 +105,7 @@ sudo bash install.sh uninstall YES y
 ## 手动 Docker 部署
 
 ```bash
-git clone https://github.com/1828006573/sublink.git
+git clone https://github.com/dabao9037/sublink.git
 cd sublink
 cp .env.example .env
 # 编辑 .env
