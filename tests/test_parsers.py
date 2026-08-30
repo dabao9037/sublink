@@ -1,11 +1,5 @@
 import base64
 import json
-import os
-import tempfile
-
-os.environ.setdefault("APP_SECRET", "yU0Nu5NptM9YvbIYI1Q2hk4SSABNbDiVjytk1Eg6jwo=")
-os.environ.setdefault("ADMIN_PASSWORD", "test-password")
-os.environ.setdefault("DB_PATH", tempfile.mktemp())
 
 from app.main import clash_config, parse_node, split_nodes
 

@@ -361,6 +361,15 @@ def clash_config(name: str, nodes: list[str]) -> str:
     return yaml.safe_dump(config, allow_unicode=True, sort_keys=False, width=120)
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code == 401 and request.url.path != "/login" and not request.url.path.startswith("/api/"):
+        return RedirectResponse("/login", status_code=303)
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -393,6 +402,40 @@ def retired_service_worker() -> Response:
 @app.get("/", response_class=HTMLResponse)
 def index(_: str = Depends(require_admin)) -> HTMLResponse:
     return HTMLResponse((BASE_DIR / "static" / "index.html").read_text())
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request) -> HTMLResponse | RedirectResponse:
+    token = request.cookies.get("sublink_session", "")
+    if token and secrets.compare_digest(token, session_token()):
+        return RedirectResponse("/", status_code=303)
+    html = (BASE_DIR / "static" / "login.html").read_text().replace("{error}", "")
+    return HTMLResponse(html)
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(username: str = Form(...), password: str = Form(...)) -> HTMLResponse | RedirectResponse:
+    if not valid_credentials(username, password):
+        message = '<div class="error">用户名或密码不正确，请重新输入。</div>'
+        html = (BASE_DIR / "static" / "login.html").read_text().replace("{error}", message)
+        return HTMLResponse(html, status_code=401)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        "sublink_session",
+        session_token(),
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 7,
+    )
+    return response
+
+
+@app.post("/logout")
+def logout() -> RedirectResponse:
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("sublink_session")
+    return response
 
 
 @app.get("/api/subscriptions")

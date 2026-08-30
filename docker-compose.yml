@@ -6,6 +6,7 @@ services:
     environment:
       DB_PATH: /data/subscriptions.db
       APP_SECRET: ${APP_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-session-secret}
       ADMIN_USER: ${ADMIN_USER}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}

@@ -94,13 +94,13 @@ sudo bash install.sh uninstall YES y
 
 ## 安全说明
 
-- 后台使用 HTTP Basic Auth
+- 后台使用独立登录页面与 HttpOnly 会话 Cookie
 - 节点链接使用 Fernet 加密后存入 SQLite
 - 订阅 URL 使用高强度随机 Token
 - Nginx 域名配置会关闭 `/s/` 路径访问日志，避免订阅 Token 进入日志
 - 不抓取远程订阅，不主动连接节点服务器
 
-如果直接通过 IP + HTTP 使用，后台密码会以 HTTP Basic Auth 方式传输，**公网长期使用强烈建议绑定 HTTPS 域名**。
+如果直接通过 IP + HTTP 使用，登录密码仍会通过明文 HTTP 传输，**公网长期使用强烈建议绑定 HTTPS 域名**。
 
 ## 手动 Docker 部署
 
