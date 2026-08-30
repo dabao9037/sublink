@@ -18,11 +18,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/1828006573/sublink/main/inst
 脚本打开后会显示菜单：
 
 ```text
-1. 安装 / 更新 SubLink
-2. 修改访问端口
-3. 修改后台账号密码
-4. 绑定域名 / 配置 HTTPS
-5. 卸载 SubLink
+1. 一键安装 / 更新
+2. 更换访问端口
+3. 重设后台账号密码
+4. 绑定域名与 HTTPS
+5. 安全卸载
 6. 查看运行信息
 0. 退出
 ```
