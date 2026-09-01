@@ -316,10 +316,35 @@ caddy_config_file(){
   fi
 }
 
+caddy_systemd_active(){
+  command_exists systemctl && systemctl is-active --quiet caddy
+}
+
+apply_caddy_config(){
+  local managed_by_systemd="$1"
+  if caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    return 0
+  fi
+  if [ "$managed_by_systemd" = "1" ]; then
+    warn "Caddy 管理接口不可用，改用 systemd 重启加载配置（常见于 Caddyfile 设置了 admin off）。"
+    systemctl restart caddy && systemctl is-active --quiet caddy && return 0
+  fi
+  return 1
+}
+
+restore_caddy_config(){
+  local config="$1" backup="$2" managed_by_systemd="$3"
+  rm -f "$config"
+  [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || return 1
+  apply_caddy_config "$managed_by_systemd" >/dev/null 2>&1
+}
+
 bind_domain_caddy(){
-  local domain="$1" backup="$2" config begin='# BEGIN SUBLINK MANAGED' end='# END SUBLINK MANAGED' temporary
+  local domain="$1" backup="$2" config begin='# BEGIN SUBLINK MANAGED' end='# END SUBLINK MANAGED' temporary managed_by_systemd=0
   config="$(caddy_config_file)"
   command_exists caddy || die "检测到 80 端口由 Caddy 占用，但找不到 caddy 命令"
+  caddy_systemd_active && managed_by_systemd=1
   mkdir -p "$(dirname "$config")"
   [ ! -e "$config" ] || cp -a "$config" "$backup/caddy.conf"
   temporary="$(mktemp)"
@@ -346,12 +371,12 @@ EOF
     [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
     die "Caddy 配置校验失败，已恢复原配置"
   fi
-  if ! caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
-    rm -f "$config"
-    [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
-    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 && \
-      caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
-    die "Caddy 管理接口重载失败，已恢复原配置；请检查 caddy 是否启用了 admin API"
+  if ! apply_caddy_config "$managed_by_systemd"; then
+    restore_caddy_config "$config" "$backup" "$managed_by_systemd" || true
+    if [ "$managed_by_systemd" = "1" ]; then
+      die "Caddy 加载新配置失败，已恢复原配置并尝试恢复服务；请运行 systemctl status caddy 查看详情"
+    fi
+    die "Caddy 管理接口不可用，且当前 Caddy 不是由 systemd 的 caddy.service 管理；已恢复原配置，未停止现有服务"
   fi
   local i
   for i in {1..45}; do
@@ -361,7 +386,10 @@ EOF
     sleep 1
   done
   journalctl -u caddy --no-pager -n 60 2>/dev/null || true
-  die "Caddy 已加载反向代理，但 45 秒内未完成 HTTPS；请确认域名为灰云且 80/443 可从公网访问"
+  if restore_caddy_config "$config" "$backup" "$managed_by_systemd"; then
+    die "Caddy 已加载反向代理，但 45 秒内未完成 HTTPS；已回滚原配置，请确认域名为灰云且 80/443 可从公网访问"
+  fi
+  die "Caddy 已加载反向代理，但 45 秒内未完成 HTTPS，且自动回滚失败；请立即检查 systemctl status caddy"
 }
 
 bind_domain_apache(){
