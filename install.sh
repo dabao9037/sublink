@@ -380,7 +380,7 @@ EOF
   fi
   local i
   for i in {1..45}; do
-    if curl -fsS --connect-timeout 2 --max-time 5 --resolve "${domain}:443:127.0.0.1" "https://${domain}/" >/dev/null 2>&1; then
+    if curl -fsS --connect-timeout 2 --max-time 5 --resolve "${domain}:443:127.0.0.1" "https://${domain}/healthz" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

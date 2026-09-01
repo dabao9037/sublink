@@ -18,6 +18,7 @@ def test_installer_reuses_caddy_before_apache_or_nginx():
     assert "reverse_proxy 127.0.0.1:${SUBLINK_PORT}" in source
     assert "apply_caddy_config \"$managed_by_systemd\"" in source
     assert "systemctl restart caddy" in source
+    assert '"https://${domain}/healthz"' in source
     assert "复用现有 Caddy" in source
 
 
