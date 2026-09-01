@@ -101,6 +101,18 @@ public_ip(){
   echo "${ip:-127.0.0.1}"
 }
 
+dns_points_to_this_host(){
+  local domain="$1" public addresses
+  public="$(public_ip)"
+  addresses="$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+  [[ -n "$public" && -n "$addresses" ]] || return 0
+  if ! grep -Fxq "$public" <<<"$addresses"; then
+    warn "域名当前解析到：$(tr '\n' ' ' <<<"$addresses")"
+    warn "本机公网 IPv4：$public"
+    die "域名未解析到本机，或 Cloudflare 代理已开启。首次签发证书时请先把该 DNS 记录改为‘仅 DNS（灰云）’，签发成功后再开启代理"
+  fi
+}
+
 fetch_source(){
   local tmp data_keep=""
   tmp=$(mktemp -d)
@@ -291,6 +303,7 @@ bind_domain(){
   domain="${domain#http://}"; domain="${domain#https://}"; domain="${domain%%/*}"
   [[ "$domain" =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$ ]] || die "域名格式不正确。"
   if [ -z "$enable_https" ]; then read -rp "是否自动申请 HTTPS 证书？[Y/n]：" enable_https; fi
+  if [[ ! "$enable_https" =~ ^[Nn]$ ]]; then dns_points_to_this_host "$domain"; fi
   install_nginx_certbot
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
   cat >"/etc/nginx/sites-available/sublink.conf" <<EOF
