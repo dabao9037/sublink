@@ -434,16 +434,16 @@ bind_domain(){
   dns_points_to_this_host "$domain"
   ensure_certbot
   backup="$(mktemp -d)"
-  if port_is_listening 80 && port_owned_only_by 80 'users:\(\(("caddy")'; then
-    if port_is_listening 443 && ! port_owned_only_by 443 'users:\(\(("caddy")'; then
+  if port_is_listening 80 && port_owned_only_by 80 '"caddy"'; then
+    if port_is_listening 443 && ! port_owned_only_by 443 '"caddy"'; then
       listener_summary 443 >&2; rm -rf "$backup"; die "443 端口被非 Caddy 程序占用，未修改现有服务"
     fi
     bind_domain_caddy "$domain" "$backup"
     success "域名绑定完成：https://${domain}/（复用现有 Caddy）"
-  elif port_is_listening 80 && port_owned_only_by 80 'users:\(\(("apache2"|"httpd")'; then
+  elif port_is_listening 80 && port_owned_only_by 80 '"(apache2|httpd)"'; then
     bind_domain_apache "$domain" "$backup"
     success "域名绑定完成：https://${domain}/（复用现有 Apache）"
-  elif ! port_is_listening 80 || port_owned_only_by 80 'users:\(\(("nginx")'; then
+  elif ! port_is_listening 80 || port_owned_only_by 80 '"nginx"'; then
     bind_domain_nginx "$domain" "$backup"
     success "域名绑定完成：https://${domain}/（使用 Nginx）"
   else
