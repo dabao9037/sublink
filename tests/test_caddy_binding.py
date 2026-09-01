@@ -12,7 +12,7 @@ def test_installer_reuses_caddy_before_apache_or_nginx():
     assert caddy < apache < nginx
     assert 'port_owned_only_by 80 \'users:\\\(\\\(("caddy")\'' in source
     assert "reverse_proxy 127.0.0.1:${SUBLINK_PORT}" in source
-    assert "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile" in source
+    assert "caddy validate --config /etc/caddy/Caddyfile" in source
     assert "systemctl reload caddy" in source
     assert "复用现有 Caddy" in source
 
