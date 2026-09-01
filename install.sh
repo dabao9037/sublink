@@ -306,6 +306,63 @@ port_owned_only_by(){
   grep -Eq "$pattern" <<<"$listeners" && ! grep -Eqv "$pattern" <<<"$listeners"
 }
 
+caddy_config_file(){
+  local fragment_dir="/etc/caddy/conf.d"
+  if [ -f /etc/caddy/Caddyfile ] && grep -Eq '^\s*import\s+conf\.d/\*' /etc/caddy/Caddyfile; then
+    mkdir -p "$fragment_dir"
+    printf '%s' "$fragment_dir/sublink.caddy"
+  else
+    printf '%s' /etc/caddy/Caddyfile
+  fi
+}
+
+bind_domain_caddy(){
+  local domain="$1" backup="$2" config begin='# BEGIN SUBLINK MANAGED' end='# END SUBLINK MANAGED' temporary
+  config="$(caddy_config_file)"
+  command_exists caddy || die "检测到 80 端口由 Caddy 占用，但找不到 caddy 命令"
+  mkdir -p "$(dirname "$config")"
+  [ ! -e "$config" ] || cp -a "$config" "$backup/caddy.conf"
+  temporary="$(mktemp)"
+  if [ -f "$config" ]; then
+    awk -v begin="$begin" -v end="$end" '
+      $0 == begin {skip=1; next}
+      $0 == end {skip=0; next}
+      !skip {print}
+    ' "$config" >"$temporary"
+  fi
+  cat >>"$temporary" <<EOF
+
+$begin
+${domain} {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:${SUBLINK_PORT}
+}
+$end
+EOF
+  install -m 0644 "$temporary" "$config"
+  rm -f "$temporary"
+  if ! caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+    rm -f "$config"
+    [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
+    die "Caddy 配置校验失败，已恢复原配置"
+  fi
+  if ! systemctl reload caddy; then
+    rm -f "$config"
+    [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 && systemctl reload caddy || true
+    die "Caddy 重载失败，已恢复原配置"
+  fi
+  local i
+  for i in {1..45}; do
+    if curl -fsS --connect-timeout 2 --max-time 5 --resolve "${domain}:443:127.0.0.1" "https://${domain}/" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  journalctl -u caddy --no-pager -n 60 2>/dev/null || true
+  die "Caddy 已加载反向代理，但 45 秒内未完成 HTTPS；请确认域名为灰云且 80/443 可从公网访问"
+}
+
 bind_domain_apache(){
   local domain="$1" backup="$2"
   DEBIAN_FRONTEND=noninteractive apt-get install -y python3-certbot-apache
@@ -377,7 +434,13 @@ bind_domain(){
   dns_points_to_this_host "$domain"
   ensure_certbot
   backup="$(mktemp -d)"
-  if port_is_listening 80 && port_owned_only_by 80 'users:\(\(("apache2"|"httpd")'; then
+  if port_is_listening 80 && port_owned_only_by 80 'users:\(\(("caddy")'; then
+    if port_is_listening 443 && ! port_owned_only_by 443 'users:\(\(("caddy")'; then
+      listener_summary 443 >&2; rm -rf "$backup"; die "443 端口被非 Caddy 程序占用，未修改现有服务"
+    fi
+    bind_domain_caddy "$domain" "$backup"
+    success "域名绑定完成：https://${domain}/（复用现有 Caddy）"
+  elif port_is_listening 80 && port_owned_only_by 80 'users:\(\(("apache2"|"httpd")'; then
     bind_domain_apache "$domain" "$backup"
     success "域名绑定完成：https://${domain}/（复用现有 Apache）"
   elif ! port_is_listening 80 || port_owned_only_by 80 'users:\(\(("nginx")'; then
