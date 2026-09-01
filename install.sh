@@ -346,11 +346,12 @@ EOF
     [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
     die "Caddy 配置校验失败，已恢复原配置"
   fi
-  if ! systemctl reload caddy; then
+  if ! caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
     rm -f "$config"
     [ ! -e "$backup/caddy.conf" ] || cp -a "$backup/caddy.conf" "$config"
-    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 && systemctl reload caddy || true
-    die "Caddy 重载失败，已恢复原配置"
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 && \
+      caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
+    die "Caddy 管理接口重载失败，已恢复原配置；请检查 caddy 是否启用了 admin API"
   fi
   local i
   for i in {1..45}; do
