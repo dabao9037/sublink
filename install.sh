@@ -286,41 +286,67 @@ change_credentials(){
   show_credentials
 }
 
-install_nginx_certbot(){
-  local missing=()
-  command_exists nginx || missing+=(nginx)
-  command_exists certbot || missing+=(certbot python3-certbot-nginx)
-  if ((${#missing[@]})); then
+ensure_certbot(){
+  if ! command_exists certbot; then
     apt-get update -y
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y certbot
   fi
 }
 
-bind_domain(){
-  require_root; load_state
-  local domain="${ARG2:-}" enable_https="${ARG3:-}"
-  if [ -z "$domain" ]; then read -rp "请输入已解析到本机 IP 的域名：" domain; fi
-  domain="${domain#http://}"; domain="${domain#https://}"; domain="${domain%%/*}"
-  [[ "$domain" =~ ^([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$ ]] || die "域名格式不正确。"
-  if [ -z "$enable_https" ]; then read -rp "是否自动申请 HTTPS 证书？[Y/n]：" enable_https; fi
-  if [[ ! "$enable_https" =~ ^[Nn]$ ]]; then dns_points_to_this_host "$domain"; fi
-  install_nginx_certbot
+listener_summary(){
+  ss -H -ltnp "sport = :$1" 2>/dev/null || true
+}
+
+port_is_listening(){ listener_summary "$1" | grep -q .; }
+
+port_owned_only_by(){
+  local port="$1" pattern="$2" listeners
+  listeners="$(listener_summary "$port")"
+  [ -n "$listeners" ] || return 1
+  grep -Eq "$pattern" <<<"$listeners" && ! grep -Eqv "$pattern" <<<"$listeners"
+}
+
+bind_domain_apache(){
+  local domain="$1" backup="$2"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-certbot-apache
+  a2enmod proxy proxy_http headers ssl rewrite >/dev/null
+  mkdir -p /etc/apache2/sites-available
+  [ ! -e /etc/apache2/sites-available/sublink.conf ] || cp -a /etc/apache2/sites-available/sublink.conf "$backup/apache.conf"
+  cat >/etc/apache2/sites-available/sublink.conf <<EOF
+<VirtualHost *:80>
+    ServerName ${domain}
+    ProxyPreserveHost On
+    ProxyPass / http://127.0.0.1:${SUBLINK_PORT}/
+    ProxyPassReverse / http://127.0.0.1:${SUBLINK_PORT}/
+    RequestHeader set X-Forwarded-Proto "http"
+    ErrorLog \${APACHE_LOG_DIR}/sublink-error.log
+    CustomLog \${APACHE_LOG_DIR}/sublink-access.log combined
+</VirtualHost>
+EOF
+  a2ensite sublink.conf >/dev/null
+  apache2ctl configtest || die "Apache 配置校验失败"
+  systemctl reload apache2 || die "Apache 重载失败"
+  if ! certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
+    rm -f /etc/apache2/sites-enabled/sublink.conf /etc/apache2/sites-available/sublink.conf
+    [ ! -e "$backup/apache.conf" ] || { cp -a "$backup/apache.conf" /etc/apache2/sites-available/sublink.conf; a2ensite sublink.conf >/dev/null; }
+    apache2ctl configtest >/dev/null 2>&1 && systemctl reload apache2 || true
+    die "HTTPS 证书申请失败，已恢复 Apache 配置"
+  fi
+}
+
+bind_domain_nginx(){
+  local domain="$1" backup="$2" was_active=0
+  command_exists nginx || DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+  DEBIAN_FRONTEND=noninteractive apt-get install -y python3-certbot-nginx
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-  cat >"/etc/nginx/sites-available/sublink.conf" <<EOF
+  [ ! -e /etc/nginx/sites-available/sublink.conf ] || cp -a /etc/nginx/sites-available/sublink.conf "$backup/nginx.conf"
+  systemctl is-active --quiet nginx && was_active=1
+  cat >/etc/nginx/sites-available/sublink.conf <<EOF
 server {
     listen 80;
     listen [::]:80;
     server_name ${domain};
     client_max_body_size 300k;
-
-    location ^~ /s/ {
-        access_log off;
-        proxy_pass http://127.0.0.1:${SUBLINK_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
     location / {
         proxy_pass http://127.0.0.1:${SUBLINK_PORT};
         proxy_set_header Host \$host;
@@ -331,18 +357,41 @@ server {
 }
 EOF
   ln -sfn /etc/nginx/sites-available/sublink.conf /etc/nginx/sites-enabled/sublink.conf
-  nginx -t
-  systemctl enable --now nginx
-  systemctl reload nginx
-  DOMAIN="$domain"; DOMAIN_HTTPS=0; PUBLIC_BASE_URL="http://${domain}"
-  if [[ ! "$enable_https" =~ ^[Nn]$ ]]; then
-    info "正在申请 Let's Encrypt HTTPS 证书..."
-    certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect
-    DOMAIN_HTTPS=1; PUBLIC_BASE_URL="https://${domain}"
+  nginx -t || die "Nginx 配置校验失败"
+  systemctl enable nginx >/dev/null
+  if (( was_active )); then systemctl reload nginx; else systemctl start nginx; fi || die "Nginx 启动或重载失败"
+  certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect || die "HTTPS 证书申请失败"
+}
+
+bind_domain(){
+  require_root; load_state
+  local domain="${ARG2:-}" enable_https="${ARG3:-}" backup
+  [ -n "$domain" ] || read -rp "请输入已解析到本机 IP 的域名：" domain
+  domain="${domain#http://}"; domain="${domain#https://}"; domain="${domain%%/*}"; domain="${domain,,}"
+  [[ "$domain" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || die "域名格式不正确。"
+  [ -n "$enable_https" ] || read -rp "是否自动申请 HTTPS 证书？[Y/n]：" enable_https
+  if [[ "$enable_https" =~ ^[Nn]$ ]]; then
+    warn "未申请证书；请自行把现有 Web 服务反向代理到 127.0.0.1:${SUBLINK_PORT}。"
+    return
   fi
+  dns_points_to_this_host "$domain"
+  ensure_certbot
+  backup="$(mktemp -d)"
+  if port_is_listening 80 && port_owned_only_by 80 'users:\(\(("apache2"|"httpd")'; then
+    bind_domain_apache "$domain" "$backup"
+    success "域名绑定完成：https://${domain}/（复用现有 Apache）"
+  elif ! port_is_listening 80 || port_owned_only_by 80 'users:\(\(("nginx")'; then
+    bind_domain_nginx "$domain" "$backup"
+    success "域名绑定完成：https://${domain}/（使用 Nginx）"
+  else
+    warn "80 端口占用详情："; listener_summary 80 >&2
+    rm -rf "$backup"
+    die "80 端口由其他程序占用；未停止现有服务，也未修改配置"
+  fi
+  rm -rf "$backup"
+  DOMAIN="$domain"; DOMAIN_HTTPS=1; PUBLIC_BASE_URL="https://${domain}"
   save_state; write_runtime_env
   (cd "$INSTALL_DIR" && docker compose up -d --force-recreate sublink)
-  success "域名绑定完成。"
   show_credentials
 }
 
