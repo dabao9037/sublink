@@ -35,6 +35,20 @@ PY
   fi
 }
 
+ensure_systemd_service(){
+  local service="$1" label="${2:-$1}"
+  command_exists systemctl || die "无法通过 systemd 管理 ${label}；当前系统缺少 systemctl"
+  systemctl enable --now "$service" >/dev/null || die "${label} 无法设置为开机自启并启动；请检查 systemctl status ${service}"
+  systemctl is-enabled --quiet "$service" || die "${label} 尚未设置为开机自启：${service}"
+  systemctl is-active --quiet "$service" || die "${label} 当前未运行：${service}"
+}
+
+require_active_systemd_listener(){
+  local service="$1" label="$2"
+  command_exists systemctl && systemctl is-active --quiet "$service" \
+    || die "检测到 ${label} 正在监听 Web 端口，但 ${service} 未由 systemd 运行；为避免抢占端口，未修改现有服务"
+}
+
 load_state(){
   [ -f "$STATE_FILE" ] || die "尚未安装 $APP_NAME，请先选择 1 安装。"
   # Old releases did not have SESSION_SECRET. Define it before sourcing while
@@ -60,11 +74,12 @@ EOF
 }
 
 install_docker(){
-  if command_exists docker && docker compose version >/dev/null 2>&1; then return; fi
-  info "正在安装 Docker Engine 与 Compose..."
-  command_exists curl || { apt-get update -y && apt-get install -y curl ca-certificates; }
-  curl -fsSL https://get.docker.com | sh
-  systemctl enable --now docker
+  if ! command_exists docker || ! docker compose version >/dev/null 2>&1; then
+    info "正在安装 Docker Engine 与 Compose..."
+    command_exists curl || { apt-get update -y && apt-get install -y curl ca-certificates; }
+    curl -fsSL https://get.docker.com | sh
+  fi
+  ensure_systemd_service docker.service "Docker"
   docker compose version >/dev/null 2>&1 || die "Docker Compose 安装失败。"
 }
 
@@ -246,6 +261,7 @@ install_app(){
   fetch_source
   save_state
   start_app
+  ensure_existing_domain_service
   open_firewall_port "$SUBLINK_PORT"
   install -m 755 "$INSTALL_DIR/install.sh" /usr/local/bin/sublink
   success "$APP_NAME 安装完成。"
@@ -306,6 +322,60 @@ port_owned_only_by(){
   grep -Eq "$pattern" <<<"$listeners" && ! grep -Eqv "$pattern" <<<"$listeners"
 }
 
+sublink_managed_web_services(){
+  if { [ -f /etc/caddy/Caddyfile ] && grep -Fq '# BEGIN SUBLINK MANAGED' /etc/caddy/Caddyfile; } \
+    || [ -f /etc/caddy/conf.d/sublink.caddy ]; then
+    printf '%s\n' caddy.service
+  fi
+  [ -e /etc/apache2/sites-enabled/sublink.conf ] && printf '%s\n' apache2.service
+  [ -e /etc/nginx/sites-enabled/sublink.conf ] && printf '%s\n' nginx.service
+}
+
+ensure_existing_domain_service(){
+  [ -n "${DOMAIN:-}" ] || return 0
+  local service="" candidates=() port candidate managed=0
+  mapfile -t candidates < <(sublink_managed_web_services)
+  for port in 80 443; do
+    port_is_listening "$port" || continue
+    if port_owned_only_by "$port" '"caddy"'; then service=caddy.service
+    elif port_owned_only_by "$port" '"(apache2|httpd)"'; then service=apache2.service
+    elif port_owned_only_by "$port" '"nginx"'; then service=nginx.service
+    else
+      warn "域名 ${DOMAIN} 的 ${port} 端口由无法安全识别的程序占用，未启动任何 Web 服务以避免抢占端口。"
+      return 0
+    fi
+    break
+  done
+  if [ -n "$service" ]; then
+    for candidate in "${candidates[@]}"; do
+      [ "$candidate" = "$service" ] && managed=1
+    done
+    if (( ! managed )); then
+      warn "检测到 ${service} 正在监听 Web 端口，但其中没有 SubLink 托管配置；未改变 Web 服务状态。"
+      return 0
+    fi
+    if ! command_exists systemctl || ! systemctl is-active --quiet "$service"; then
+      warn "检测到 ${service} 正在监听 Web 端口但不属于活动的 systemd 服务；未尝试启动其他 Web 服务。"
+      return 0
+    fi
+  else
+    if ((${#candidates[@]} == 1)); then
+      service="${candidates[0]}"
+    elif ((${#candidates[@]} > 1)); then
+      warn "检测到多个 Web 服务包含 SubLink 托管配置，未自动启动，避免 Apache/Nginx/Caddy 抢占端口。"
+      return 0
+    else
+      warn "已保存域名 ${DOMAIN}，但未找到当前监听者或 SubLink 托管配置；未自动启动 Web 服务。"
+      return 0
+    fi
+  fi
+  case "$service" in
+    caddy.service) ensure_systemd_service "$service" "Caddy" ;;
+    apache2.service) ensure_systemd_service "$service" "Apache" ;;
+    nginx.service) ensure_systemd_service "$service" "Nginx" ;;
+  esac
+}
+
 caddy_config_file(){
   local fragment_dir="/etc/caddy/conf.d"
   if [ -f /etc/caddy/Caddyfile ] && grep -Eq '^\s*import\s+conf\.d/\*' /etc/caddy/Caddyfile; then
@@ -314,10 +384,6 @@ caddy_config_file(){
   else
     printf '%s' /etc/caddy/Caddyfile
   fi
-}
-
-caddy_systemd_active(){
-  command_exists systemctl && systemctl is-active --quiet caddy
 }
 
 apply_caddy_config(){
@@ -344,7 +410,9 @@ bind_domain_caddy(){
   local domain="$1" backup="$2" config begin='# BEGIN SUBLINK MANAGED' end='# END SUBLINK MANAGED' temporary managed_by_systemd=0
   config="$(caddy_config_file)"
   command_exists caddy || die "检测到 80 端口由 Caddy 占用，但找不到 caddy 命令"
-  caddy_systemd_active && managed_by_systemd=1
+  require_active_systemd_listener caddy.service "Caddy"
+  ensure_systemd_service caddy.service "Caddy"
+  managed_by_systemd=1
   mkdir -p "$(dirname "$config")"
   [ ! -e "$config" ] || cp -a "$config" "$backup/caddy.conf"
   temporary="$(mktemp)"
@@ -395,6 +463,8 @@ EOF
 bind_domain_apache(){
   local domain="$1" backup="$2"
   DEBIAN_FRONTEND=noninteractive apt-get install -y python3-certbot-apache
+  require_active_systemd_listener apache2.service "Apache"
+  ensure_systemd_service apache2.service "Apache"
   a2enmod proxy proxy_http headers ssl rewrite >/dev/null
   mkdir -p /etc/apache2/sites-available
   [ ! -e /etc/apache2/sites-available/sublink.conf ] || cp -a /etc/apache2/sites-available/sublink.conf "$backup/apache.conf"
@@ -421,12 +491,12 @@ EOF
 }
 
 bind_domain_nginx(){
-  local domain="$1" backup="$2" was_active=0
+  local domain="$1" backup="$2"
   command_exists nginx || DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
   DEBIAN_FRONTEND=noninteractive apt-get install -y python3-certbot-nginx
+  if port_is_listening 80; then require_active_systemd_listener nginx.service "Nginx"; fi
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
   [ ! -e /etc/nginx/sites-available/sublink.conf ] || cp -a /etc/nginx/sites-available/sublink.conf "$backup/nginx.conf"
-  systemctl is-active --quiet nginx && was_active=1
   cat >/etc/nginx/sites-available/sublink.conf <<EOF
 server {
     listen 80;
@@ -444,8 +514,8 @@ server {
 EOF
   ln -sfn /etc/nginx/sites-available/sublink.conf /etc/nginx/sites-enabled/sublink.conf
   nginx -t || die "Nginx 配置校验失败"
-  systemctl enable nginx >/dev/null
-  if (( was_active )); then systemctl reload nginx; else systemctl start nginx; fi || die "Nginx 启动或重载失败"
+  ensure_systemd_service nginx.service "Nginx"
+  systemctl reload nginx || die "Nginx 重载失败"
   certbot --nginx -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect || die "HTTPS 证书申请失败"
 }
 
