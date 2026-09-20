@@ -362,7 +362,10 @@ def clash_config(name: str, nodes: list[str]) -> str:
             {"name": "节点选择", "type": "select", "proxies": ["自动选择", "DIRECT", *names]},
             {"name": "自动选择", "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50},
         ],
-        "rules": ["MATCH,节点选择"],
+        "rules": [
+            "GEOIP,CN,DIRECT",
+            "MATCH,节点选择",
+        ],
     }
     return yaml.safe_dump(config, allow_unicode=True, sort_keys=False, width=120)
 
